@@ -87,9 +87,23 @@ The installer symlinks rather than copies, so a `git pull` updates the
 installed command too. It will warn you if the target directory isn't on your
 `PATH`.
 
+## ⚠️ Warnings
+
+- **Battery and heat.** Keeping a Mac awake for hours drains the battery and
+  generates heat — that's the point of the tool, but set a duration or a
+  `-b` threshold rather than leaving it running indefinitely on battery.
+- **Your screen may not lock.** Keeping the display awake also prevents the
+  idle timeout that triggers your screen saver and lock screen. If you walk
+  away while stay-alive is running (without `-D`), your Mac may sit unlocked.
+  Lock it manually (Ctrl+Cmd+Q) when you leave.
+- **Command mode runs exactly what you give it.** `stay-alive <command>`
+  executes the command with your normal privileges, just as if you'd typed
+  it yourself — it adds no safety net.
+- **Don't disable lid sleep casually.** Closing the lid still puts the Mac to
+  sleep; overriding that requires `sudo pmset disablesleep 1`, which is
+  system-wide and can cook a lid-closed laptop in a bag. Not recommended.
+
 ## Notes
 
-- Closing the laptop lid still puts the Mac to sleep. Overriding that requires
-  `sudo pmset disablesleep 1`, which is system-wide and not recommended unless
-  you really need it.
 - Requires macOS (uses `caffeinate`, `pmset`, and `osascript`).
+- License: [MIT](LICENSE).
