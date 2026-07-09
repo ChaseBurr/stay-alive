@@ -178,14 +178,28 @@ fi
 mkdir -p "${PIDFILE:h}"
 echo $$ > "$PIDFILE"
 
+SLEEP_PID=""
 cleanup() {
   kill "$CAFF_PID" 2>/dev/null || true
   # Reap the wrapped command too, so TERM doesn't orphan it
   [[ -n $CMD_PID ]] && kill "$CMD_PID" 2>/dev/null || true
+  [[ -n $SLEEP_PID ]] && kill "$SLEEP_PID" 2>/dev/null || true
   # Only remove the pidfile if it still belongs to this instance
   [[ $(read_pidfile) == $$ ]] && rm -f "$PIDFILE"
 }
-trap cleanup INT TERM EXIT
+
+# Exit right away on Ctrl+C / stay-alive stop. Without this, zsh resumes
+# the interrupted wait on the battery-poll sleep after the trap returns,
+# delaying exit by up to CHECK_INTERVAL seconds.
+on_signal() {
+  trap - INT TERM EXIT
+  cleanup
+  echo ""
+  echo "Done — normal sleep behavior restored."
+  exit 130
+}
+trap on_signal INT TERM
+trap cleanup EXIT
 
 if [[ -n $THRESHOLD ]]; then
   while kill -0 "$CAFF_PID" 2>/dev/null; do
@@ -204,7 +218,9 @@ if [[ -n $THRESHOLD ]]; then
       fi
     fi
     sleep "$CHECK_INTERVAL" &
-    wait $! 2>/dev/null || true
+    SLEEP_PID=$!
+    wait "$SLEEP_PID" 2>/dev/null || true
+    SLEEP_PID=""
   done
 fi
 
