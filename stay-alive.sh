@@ -12,6 +12,8 @@
 
 set -euo pipefail
 
+command -v caffeinate >/dev/null || { echo "error: caffeinate not found (macOS only)" >&2; exit 1; }
+
 CHECK_INTERVAL=30  # seconds between battery checks
 
 usage() {
@@ -19,16 +21,20 @@ usage() {
   exit 1
 }
 
-# Convert "45m" / "2h" / "90" into seconds
+# Convert "45m" / "2h" / "90" into seconds.
+# The <-> globs guarantee the numeric part is a pure non-negative integer
+# before it reaches arithmetic expansion, which would otherwise resolve
+# identifiers, hex/octal, and operators inside $(( )).
 to_seconds() {
-  local input=$1
+  local input=$1 num unit
   case $input in
-    *h) echo $(( ${input%h} * 3600 )) ;;
-    *m) echo $(( ${input%m} * 60 )) ;;
-    *s) echo $(( ${input%s} )) ;;
-    <->) echo "$input" ;;
+    <->h) num=${input%h}; unit=3600 ;;
+    <->m) num=${input%m}; unit=60 ;;
+    <->s) num=${input%s}; unit=1 ;;
+    <->)  echo "$input"; return ;;
     *) echo "error: can't parse duration '$input' (try 90, 45m, or 2h)" >&2; exit 1 ;;
   esac
+  echo $(( num * unit ))
 }
 
 battery_pct() {
@@ -88,10 +94,13 @@ trap cleanup INT TERM EXIT
 
 if [[ -n $THRESHOLD ]]; then
   while kill -0 "$CAFF_PID" 2>/dev/null; do
-    if ! on_ac_power && (( $(battery_pct) <= THRESHOLD )); then
-      echo "🔋 Battery at $(battery_pct)% (≤ ${THRESHOLD}%) — stopping."
-      kill "$CAFF_PID" 2>/dev/null || true
-      break
+    if ! on_ac_power; then
+      pct=$(battery_pct)
+      if [[ $pct == <-> ]] && (( pct <= THRESHOLD )); then
+        echo "🔋 Battery at ${pct}% (≤ ${THRESHOLD}%) — stopping."
+        kill "$CAFF_PID" 2>/dev/null || true
+        break
+      fi
     fi
     sleep "$CHECK_INTERVAL" &
     wait $! 2>/dev/null || true
