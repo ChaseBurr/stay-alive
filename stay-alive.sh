@@ -18,9 +18,10 @@ command -v caffeinate >/dev/null || { echo "error: caffeinate not found (macOS o
 
 CHECK_INTERVAL=30  # seconds between battery checks
 PIDFILE="${XDG_CACHE_HOME:-$HOME/.cache}/stay-alive.pid"
+SCRIPT_PATH=${0:a}  # $0 becomes the function name inside zsh functions
 
 usage() {
-  sed -n '3,13p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '3,13p' "$SCRIPT_PATH" | sed 's/^# \{0,1\}//'
   exit 1
 }
 
