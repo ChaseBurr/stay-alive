@@ -34,7 +34,7 @@ if [[ ":$PATH:" != *":$BIN_DIR:"* ]]; then
   echo "⚠️  ONE MORE STEP — $BIN_DIR is not on your PATH,"
   echo "   so 'stay-alive' will NOT work yet (zsh: command not found)."
   echo ""
-  case ${SHELL:t} in
+  case ${${SHELL:-zsh}:t} in
     zsh)
       echo "   Run this, then open a new terminal:"
       echo ""

@@ -25,7 +25,7 @@ SCRIPT_PATH=${0:a}  # $0 becomes the function name inside zsh functions
 
 usage() {
   sed -n '3,13p' "$SCRIPT_PATH" | sed 's/^# \{0,1\}//'
-  exit 1
+  exit 0
 }
 
 # Convert "45m" / "2h" / "90" into seconds.
@@ -153,7 +153,37 @@ fi
 FLAGS="-dims"
 [[ -n $NO_DISPLAY ]] && FLAGS="-ims"
 
+# Install the traps before anything is launched, so a signal can never
+# land in a window where caffeinate or the wrapped command gets orphaned
 CMD_PID=""
+CAFF_PID=""
+SLEEP_PID=""
+cleanup() {
+  [[ -n $CAFF_PID ]] && kill "$CAFF_PID" 2>/dev/null || true
+  # Reap the wrapped command too, so TERM doesn't orphan it
+  [[ -n $CMD_PID ]] && kill "$CMD_PID" 2>/dev/null || true
+  [[ -n $SLEEP_PID ]] && kill "$SLEEP_PID" 2>/dev/null || true
+  # Only remove the pidfile if it still belongs to this instance
+  [[ $(read_pidfile) == $$ ]] && rm -f "$PIDFILE"
+  return 0
+}
+
+# Exit right away on Ctrl+C / stay-alive stop. Without this, zsh resumes
+# the interrupted wait on the battery-poll sleep after the trap returns,
+# delaying exit by up to CHECK_INTERVAL seconds.
+on_signal() {
+  trap - INT TERM EXIT
+  cleanup
+  echo ""
+  echo "Done — normal sleep behavior restored."
+  exit 130
+}
+trap on_signal INT TERM
+trap cleanup EXIT
+
+mkdir -p "${PIDFILE:h}"
+echo $$ > "$PIDFILE"
+
 if (( ${#CMD} )); then
   echo "☕ Keeping Mac awake while running: ${CMD[*]}"
   "${CMD[@]}" &
@@ -175,36 +205,12 @@ fi
 
 [[ -n $THRESHOLD ]] && echo "🔋 Will stop if battery drops to ${THRESHOLD}% while unplugged."
 
-mkdir -p "${PIDFILE:h}"
-echo $$ > "$PIDFILE"
-
-SLEEP_PID=""
-cleanup() {
-  kill "$CAFF_PID" 2>/dev/null || true
-  # Reap the wrapped command too, so TERM doesn't orphan it
-  [[ -n $CMD_PID ]] && kill "$CMD_PID" 2>/dev/null || true
-  [[ -n $SLEEP_PID ]] && kill "$SLEEP_PID" 2>/dev/null || true
-  # Only remove the pidfile if it still belongs to this instance
-  [[ $(read_pidfile) == $$ ]] && rm -f "$PIDFILE"
-}
-
-# Exit right away on Ctrl+C / stay-alive stop. Without this, zsh resumes
-# the interrupted wait on the battery-poll sleep after the trap returns,
-# delaying exit by up to CHECK_INTERVAL seconds.
-on_signal() {
-  trap - INT TERM EXIT
-  cleanup
-  echo ""
-  echo "Done — normal sleep behavior restored."
-  exit 130
-}
-trap on_signal INT TERM
-trap cleanup EXIT
-
 if [[ -n $THRESHOLD ]]; then
   while kill -0 "$CAFF_PID" 2>/dev/null; do
     if ! on_ac_power; then
-      pct=$(battery_pct)
+      # || guard: a transient pmset/grep failure must not kill the
+      # script via set -e; the <-> check below skips the bad reading
+      pct=$(battery_pct) || pct=""
       if [[ $pct == <-> ]] && (( pct <= THRESHOLD )); then
         if [[ -n $CMD_PID ]]; then
           msg="Battery at ${pct}% — no longer keeping the Mac awake (your command is still running)."
