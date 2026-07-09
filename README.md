@@ -76,7 +76,13 @@ other apps and scripts use caffeinate too.
 
 ## Install
 
-To run it from anywhere as `stay-alive`:
+With Homebrew:
+
+```bash
+brew install ChaseBurr/tap/stay-alive
+```
+
+Or from a clone, to run it from anywhere as `stay-alive`:
 
 ```bash
 ./install.sh                 # symlinks into ~/.local/bin
