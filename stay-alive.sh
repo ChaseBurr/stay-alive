@@ -19,8 +19,7 @@ command -v caffeinate >/dev/null || { echo "error: caffeinate not found (macOS o
 CHECK_INTERVAL=30  # seconds between battery checks
 
 # The pidfile trusts anything running as this user: stop kills whatever
-# own-UID PID it finds here, and concurrent instances overwrite each other,
-# so status/stop only see the most recently started one.
+# own-UID PID it finds here. Only one instance may run at a time.
 PIDFILE="${XDG_CACHE_HOME:-$HOME/.cache}/stay-alive.pid"
 SCRIPT_PATH=${0:a}  # $0 becomes the function name inside zsh functions
 
@@ -138,6 +137,13 @@ fi
 if [[ -n $THRESHOLD ]] && ! pmset -g batt | grep -q "InternalBattery"; then
   echo "note: no battery detected, ignoring -b $THRESHOLD" >&2
   THRESHOLD=""
+fi
+
+# Refuse to start if a live instance already owns the pidfile
+existing=$(read_pidfile)
+if [[ $existing == <-> ]] && kill -0 "$existing" 2>/dev/null; then
+  echo "error: stay-alive is already running (PID $existing) — run 'stay-alive stop' first" >&2
+  exit 1
 fi
 
 # -d  keep the display awake (dropped with -D/--no-display)

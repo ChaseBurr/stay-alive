@@ -56,7 +56,23 @@ screen sleep while the Mac itself stays awake — handy for overnight downloads.
 
 `stay-alive` writes a pidfile to `~/.cache/stay-alive.pid`, so you can check
 on or stop a session from another terminal (or one running in the
-background). `status` and `stop` target the most recently started instance.
+background). Only one instance runs at a time — starting a second one errors
+and points you at `stay-alive stop`.
+
+### If `stop` can't find it
+
+If the pidfile is stale or missing (say, the Mac hard-rebooted or you're on
+an older version), you can hunt it down manually:
+
+```bash
+pmset -g assertions          # see everything currently preventing sleep
+pkill -f stay-alive.sh       # kill any running stay-alive scripts
+pgrep -lf caffeinate         # list caffeinate processes and who started them
+```
+
+`stay-alive`'s own caffeinate dies with the script, so `pkill -f
+stay-alive.sh` is normally all you need. Avoid a blanket `pkill caffeinate` —
+other apps and scripts use caffeinate too.
 
 ## Install
 
