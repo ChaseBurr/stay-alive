@@ -31,8 +31,31 @@ echo "Installed: $TARGET -> $SOURCE"
 
 if [[ ":$PATH:" != *":$BIN_DIR:"* ]]; then
   echo ""
-  echo "note: $BIN_DIR is not on your PATH. Add this to your ~/.zshrc:"
-  echo "  export PATH=\"$BIN_DIR:\$PATH\""
+  echo "⚠️  ONE MORE STEP — $BIN_DIR is not on your PATH,"
+  echo "   so 'stay-alive' will NOT work yet (zsh: command not found)."
+  echo ""
+  case ${SHELL:t} in
+    zsh)
+      echo "   Run this, then open a new terminal:"
+      echo ""
+      echo "     echo 'export PATH=\"$BIN_DIR:\$PATH\"' >> ~/.zshrc && source ~/.zshrc"
+      ;;
+    bash)
+      echo "   Run this, then open a new terminal:"
+      echo ""
+      echo "     echo 'export PATH=\"$BIN_DIR:\$PATH\"' >> ~/.bash_profile && source ~/.bash_profile"
+      ;;
+    fish)
+      echo "   Run this:"
+      echo ""
+      echo "     fish_add_path $BIN_DIR"
+      ;;
+    *)
+      echo "   Add this line to your shell's startup file:"
+      echo ""
+      echo "     export PATH=\"$BIN_DIR:\$PATH\""
+      ;;
+  esac
 else
   echo "Run it with: stay-alive"
 fi

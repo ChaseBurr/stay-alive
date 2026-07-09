@@ -93,6 +93,30 @@ The installer symlinks rather than copies, so a `git pull` updates the
 installed command too. It will warn you if the target directory isn't on your
 `PATH`.
 
+### "zsh: command not found: stay-alive"
+
+The install succeeded, but your shell doesn't look in `~/.local/bin` for
+commands. Tell it to (this is the fix for the default macOS zsh):
+
+```zsh
+echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc && source ~/.zshrc
+```
+
+For **bash**, use `~/.bash_profile` instead of `~/.zshrc`; for **fish**, run
+`fish_add_path ~/.local/bin`. Other terminals that are already open won't see
+the change until you open a new one (or `source` the file there too).
+
+Other gotchas of the same flavor:
+
+- **Installed with Homebrew but not found** — open a new terminal first; if
+  it persists, brew's own directory is missing from `PATH`, fixed with
+  `echo 'eval "$(/opt/homebrew/bin/brew shellenv)"' >> ~/.zprofile`
+  (`/usr/local/bin/brew` on Intel Macs).
+- **Works in one terminal but not another** — the `PATH` change was applied
+  to the current session only; make sure it's in your shell startup file.
+- **`sudo stay-alive` not found** — `sudo` uses a minimal `PATH` that skips
+  user bin directories. You shouldn't need sudo for this tool at all.
+
 ## ⚠️ Warnings
 
 - **Battery and heat.** Keeping a Mac awake for hours drains the battery and
