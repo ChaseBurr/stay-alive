@@ -3,21 +3,24 @@
 # stay-alive.sh — keep your Mac awake
 #
 # Usage:
-#   ./stay-alive.sh                # stay awake until you press Ctrl+C
-#   ./stay-alive.sh 45m            # stay awake for 45 minutes
-#   ./stay-alive.sh 2h             # stay awake for 2 hours
-#   ./stay-alive.sh 90             # plain number = seconds
-#   ./stay-alive.sh -b 20          # stop when battery drops to 20% (on battery power)
-#   ./stay-alive.sh -b 15 2h       # 2 hours max, but bail early if battery hits 15%
+#   stay-alive                # stay awake until you press Ctrl+C
+#   stay-alive 45m            # stay awake for 45 minutes (also 2h, or 90 = seconds)
+#   stay-alive -b 20          # stop if battery drops to 20% while unplugged
+#   stay-alive -b 15 2h       # 2 hours max, but bail early if battery hits 15%
+#   stay-alive -D 2h          # keep the Mac awake but let the display sleep
+#   stay-alive make build     # stay awake while a command runs (use -- if needed)
+#   stay-alive status         # show whether stay-alive is running
+#   stay-alive stop           # stop a running stay-alive
 
 set -euo pipefail
 
 command -v caffeinate >/dev/null || { echo "error: caffeinate not found (macOS only)" >&2; exit 1; }
 
 CHECK_INTERVAL=30  # seconds between battery checks
+PIDFILE="${XDG_CACHE_HOME:-$HOME/.cache}/stay-alive.pid"
 
 usage() {
-  sed -n '3,11p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '3,13p' "$0" | sed 's/^# \{0,1\}//'
   exit 1
 }
 
@@ -45,9 +48,43 @@ on_ac_power() {
   pmset -g batt | head -1 | grep -q "AC Power"
 }
 
+notify() {
+  printf '\a'
+  osascript -e 'display notification "'"$1"'" with title "stay-alive"' 2>/dev/null || true
+}
+
+read_pidfile() {
+  [[ -f $PIDFILE ]] && cat "$PIDFILE" 2>/dev/null || true
+}
+
+# Subcommands
+case ${1:-} in
+  status)
+    pid=$(read_pidfile)
+    if [[ $pid == <-> ]] && kill -0 "$pid" 2>/dev/null; then
+      echo "stay-alive is running (PID $pid)."
+    else
+      echo "stay-alive is not running."
+    fi
+    exit 0
+    ;;
+  stop)
+    pid=$(read_pidfile)
+    if [[ $pid == <-> ]] && kill -0 "$pid" 2>/dev/null; then
+      kill "$pid"
+      echo "Stopped stay-alive (PID $pid)."
+    else
+      echo "stay-alive is not running."
+    fi
+    exit 0
+    ;;
+esac
+
 # Parse arguments
 THRESHOLD=""
 DURATION=""
+NO_DISPLAY=""
+CMD=()
 while [[ $# -gt 0 ]]; do
   case $1 in
     -h|--help) usage ;;
@@ -56,39 +93,78 @@ while [[ $# -gt 0 ]]; do
       THRESHOLD=$2
       shift 2
       ;;
-    *)
+    -D|--no-display)
+      NO_DISPLAY=1
+      shift
+      ;;
+    --)
+      shift
+      CMD=("$@")
+      break
+      ;;
+    <->|<->h|<->m|<->s)
       DURATION=$1
       shift
+      [[ $# -eq 0 ]] || { echo "error: unexpected arguments after duration: $*" >&2; exit 1; }
+      ;;
+    *)
+      CMD=("$@")
+      break
       ;;
   esac
 done
+
+if [[ -n $DURATION && ${#CMD} -gt 0 ]]; then
+  echo "error: give a duration or a command, not both" >&2
+  exit 1
+fi
+
+if (( ${#CMD} )) && ! command -v "${CMD[1]}" >/dev/null; then
+  echo "error: '${CMD[1]}' is neither a duration (try 90, 45m, or 2h) nor a command" >&2
+  exit 1
+fi
 
 if [[ -n $THRESHOLD ]] && ! pmset -g batt | grep -q "InternalBattery"; then
   echo "note: no battery detected, ignoring -b $THRESHOLD" >&2
   THRESHOLD=""
 fi
 
-# -d  keep the display awake
+# -d  keep the display awake (dropped with -D/--no-display)
 # -i  prevent idle sleep
 # -m  prevent disk sleep
 # -s  prevent system sleep (on AC power)
 FLAGS="-dims"
+[[ -n $NO_DISPLAY ]] && FLAGS="-ims"
 
-CAFF_ARGS=($FLAGS)
-if [[ -n $DURATION ]]; then
-  secs=$(to_seconds "$DURATION")
-  CAFF_ARGS+=(-t "$secs")
-  echo "☕ Keeping Mac awake for $DURATION ($secs seconds)..."
+CMD_PID=""
+if (( ${#CMD} )); then
+  echo "☕ Keeping Mac awake while running: ${CMD[*]}"
+  "${CMD[@]}" &
+  CMD_PID=$!
+  caffeinate $FLAGS -w "$CMD_PID" &
+  CAFF_PID=$!
 else
-  echo "☕ Keeping Mac awake until you press Ctrl+C..."
+  CAFF_ARGS=($FLAGS)
+  if [[ -n $DURATION ]]; then
+    secs=$(to_seconds "$DURATION")
+    CAFF_ARGS+=(-t "$secs")
+    echo "☕ Keeping Mac awake for $DURATION ($secs seconds)..."
+  else
+    echo "☕ Keeping Mac awake until you press Ctrl+C (or run: stay-alive stop)..."
+  fi
+  caffeinate $CAFF_ARGS &
+  CAFF_PID=$!
 fi
+
 [[ -n $THRESHOLD ]] && echo "🔋 Will stop if battery drops to ${THRESHOLD}% while unplugged."
 
-caffeinate $CAFF_ARGS &
-CAFF_PID=$!
+mkdir -p "${PIDFILE:h}"
+echo $$ > "$PIDFILE"
 
 cleanup() {
   kill "$CAFF_PID" 2>/dev/null || true
+  # Only remove the pidfile if it still belongs to this instance
+  [[ $(read_pidfile) == $$ ]] && rm -f "$PIDFILE"
 }
 trap cleanup INT TERM EXIT
 
@@ -97,7 +173,13 @@ if [[ -n $THRESHOLD ]]; then
     if ! on_ac_power; then
       pct=$(battery_pct)
       if [[ $pct == <-> ]] && (( pct <= THRESHOLD )); then
-        echo "🔋 Battery at ${pct}% (≤ ${THRESHOLD}%) — stopping."
+        if [[ -n $CMD_PID ]]; then
+          msg="Battery at ${pct}% — no longer keeping the Mac awake (your command is still running)."
+        else
+          msg="Battery at ${pct}% — no longer keeping the Mac awake."
+        fi
+        echo "🔋 $msg"
+        notify "$msg"
         kill "$CAFF_PID" 2>/dev/null || true
         break
       fi
@@ -105,6 +187,14 @@ if [[ -n $THRESHOLD ]]; then
     sleep "$CHECK_INTERVAL" &
     wait $! 2>/dev/null || true
   done
+fi
+
+if [[ -n $CMD_PID ]]; then
+  CMD_STATUS=0
+  wait "$CMD_PID" || CMD_STATUS=$?
+  wait "$CAFF_PID" 2>/dev/null || true
+  echo "Done — normal sleep behavior restored."
+  exit $CMD_STATUS
 fi
 
 wait "$CAFF_PID" 2>/dev/null || true
