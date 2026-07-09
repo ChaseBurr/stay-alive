@@ -17,6 +17,10 @@ set -euo pipefail
 command -v caffeinate >/dev/null || { echo "error: caffeinate not found (macOS only)" >&2; exit 1; }
 
 CHECK_INTERVAL=30  # seconds between battery checks
+
+# The pidfile trusts anything running as this user: stop kills whatever
+# own-UID PID it finds here, and concurrent instances overwrite each other,
+# so status/stop only see the most recently started one.
 PIDFILE="${XDG_CACHE_HOME:-$HOME/.cache}/stay-alive.pid"
 SCRIPT_PATH=${0:a}  # $0 becomes the function name inside zsh functions
 
@@ -49,9 +53,15 @@ on_ac_power() {
   pmset -g batt | head -1 | grep -q "AC Power"
 }
 
+# Pass the message as argv data, never interpolated into AppleScript source,
+# so no value reaching $1 can be parsed as code.
 notify() {
   printf '\a'
-  osascript -e 'display notification "'"$1"'" with title "stay-alive"' 2>/dev/null || true
+  osascript - "$1" >/dev/null 2>&1 <<'APPLESCRIPT' || true
+on run argv
+  display notification (item 1 of argv) with title "stay-alive"
+end run
+APPLESCRIPT
 }
 
 read_pidfile() {
@@ -164,6 +174,8 @@ echo $$ > "$PIDFILE"
 
 cleanup() {
   kill "$CAFF_PID" 2>/dev/null || true
+  # Reap the wrapped command too, so TERM doesn't orphan it
+  [[ -n $CMD_PID ]] && kill "$CMD_PID" 2>/dev/null || true
   # Only remove the pidfile if it still belongs to this instance
   [[ $(read_pidfile) == $$ ]] && rm -f "$PIDFILE"
 }
